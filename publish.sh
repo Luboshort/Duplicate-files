@@ -22,7 +22,7 @@ gh auth setup-git >/dev/null
 gh repo view "$REPO" >/dev/null 2>&1 || gh repo create "$REPO" --public \
     --description "Safe duplicate file finder for macOS – APFS clones, whole duplicate folders, folder compare"
 
-echo "▶ Building $NAME $VERSION…"
+echo "▶ Building $NAME ${VERSION}…"
 NO_REVEAL=1 bash build.sh
 # stálý název DuplicateFiles.dmg → install.sh stahuje vždy .../releases/latest/download/DuplicateFiles.dmg
 OUT="$(mktemp -d /tmp/duplicate-files-release.XXXXXX)"
@@ -47,7 +47,7 @@ if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
 fi
 git push -u origin main
 
-echo "▶ Creating release $TAG…"
+echo "▶ Creating release ${TAG}…"
 # poznámky k vydání: sekce této verze z CHANGELOG.md
 CHANGES="$(awk -v v="## $VERSION" 'index($0,v)==1{f=1;next} /^## /{f=0} f' CHANGELOG.md 2>/dev/null || true)"
 NOTES="${CHANGES}

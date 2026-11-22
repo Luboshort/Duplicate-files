@@ -135,7 +135,7 @@ For Macs with Apple silicon (M1 and newer).
 
 ---
 CZ: Doporučeno nainstalovat z Terminálu (bez varování macOS) – příkaz výše.
-Ručně: přetáhni „$NAME“ do „Applications“; když macOS aplikaci zablokuje:
+Ručně: přetáhni „${NAME}“ do „Applications“; když macOS aplikaci zablokuje:
 „Hotovo“ → Nastavení systému → Soukromí a zabezpečení → „Přesto otevřít“.
 TXT
 DMG="$HOME/Desktop/$NAME-$VERSION.dmg"

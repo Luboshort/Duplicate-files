@@ -73,7 +73,7 @@ mkdir -p "$DEST_DIR"
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do pgrep -f "$APP_NAME.app/Contents/MacOS/" >/dev/null || break; sleep 0.5; done
 
-echo "▶ Installing to $DEST_DIR…"
+echo "▶ Installing to ${DEST_DIR}…"
 NEW="$DEST_DIR/.$APP_NAME.app.new"
 rm -rf "$NEW"
 ditto "$SRC_APP" "$NEW"
