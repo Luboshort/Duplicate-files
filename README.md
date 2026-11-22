@@ -35,7 +35,7 @@ It downloads the latest version, installs it to *Applications* (or to `~/Applica
   - Export the list to CSV.
 - **Compare two places**: see what is only in A, only in B, or different. *Fill in* copies the missing files so both places end up with the same content. It never deletes or overwrites anything.
 - **Unlock and fix permissions** in a folder or disk, with a preview and a saved undo record.
-- **Cloud-synced folders** (OneDrive, Google Drive, Dropbox, iCloud Drive): no clones or links there (they would re-upload files and break version history); files that are only in the cloud are never downloaded just to compare them.
+- **Cloud-synced folders** (OneDrive, Google Drive, Dropbox, iCloud Drive) – also when they are subfolders of the scanned folder: their files are shown with ☁ but never marked, deleted, moved or replaced; only copies outside the cloud can be removed. Files that are only in the cloud are never downloaded just to compare them.
 - **Excluded folders** (⚙ → Excluded folders): a specific path, or a folder name anywhere such as `node_modules`.
 
 ## Safety principles

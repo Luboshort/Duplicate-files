@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.6
+- Cloud-synced subfolders inside a scanned folder are detected while scanning (Google Drive mirror, Dropbox, OneDrive, iCloud, File Provider folders – also by their hidden marker files and extended attributes).
+- Files in cloud-synced folders are protected: shown with ☁, never marked, deleted, moved or replaced; they can only be the kept original. A warning lists the cloud folders after each search.
+
 ## 2.5
 - New look matching Katalog souborů: light pane inside the tabs with a thin rounded outline, framed lists with both scrollbars, a status bar at the bottom (status, language, version, Check for updates).
 - A new version is offered in a yellow bar at the top (Install and restart · What's new · Hide); after an update a green bar confirms the new version.

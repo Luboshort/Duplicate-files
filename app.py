@@ -10,7 +10,7 @@ pracovat: přesunout do Koše, přesunout jinam, nahradit APFS klonem, pevným
 odkazem, aliasem Finderu nebo symbolickým odkazem, exportovat přehled do CSV.
 """
 
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 APP_TITLE = "Duplicitní soubory"   # přeloží se níže (T ještě není definováno)
 
 import csv
@@ -108,9 +108,10 @@ class Cancelled(Exception):
 
 class FileInfo:
     __slots__ = ("path", "name", "size", "mtime", "btime", "dev", "ino", "root", "marked", "locked", "clone",
-                 "ctime", "dataless")
+                 "ctime", "dataless", "cloud")
 
-    def __init__(self, path, name, size, mtime, btime, dev, ino, root, locked=False, ctime=0.0, dataless=False):
+    def __init__(self, path, name, size, mtime, btime, dev, ino, root, locked=False, ctime=0.0, dataless=False,
+                 cloud=""):
         self.path, self.name, self.size = path, name, size
         self.mtime, self.btime, self.dev, self.ino, self.root = mtime, btime, dev, ino, root
         self.marked = False
@@ -118,6 +119,7 @@ class FileInfo:
         self.clone = None        # identifikátor dat APFS klonu (stejný = data jsou na disku jen jednou)
         self.ctime = ctime       # čas změny metadat – mění se při každém zápisu (kvůli paměti otisků)
         self.dataless = dataless  # jen v cloudu, nestažený (OneDrive/Google Drive/iCloud „jen online“)
+        self.cloud = cloud        # název cloudu, se kterým se složka synchronizuje ("" = žádný)
 
     def __repr__(self):
         return f"FileInfo({self.path!r})"
@@ -220,6 +222,46 @@ def is_cloud(path):
     return bool(cloud_provider(path))
 
 
+CLOUD_XATTR_PREFIXES = (("com.google.drivefs", "Google Drive"), ("com.dropbox", "Dropbox"),
+                        ("com.microsoft.onedrive", "OneDrive"), ("com.microsoft.OneDrive", "OneDrive"),
+                        ("com.apple.fileprovider", "cloud"))
+
+
+def cloud_of_listing(d, names):
+    """Při procházení: je složka `d` kořenem synchronizované složky? Podle skrytých souborů,
+    názvu přímo v domovské složce a rozšířených atributů (Google Drive, Dropbox, OneDrive…)."""
+    for m in CLOUD_MARKER_FILES:
+        if m in names:
+            return CLOUD_MARKER_FILES[m]
+    home = os.path.expanduser("~")
+    base = os.path.basename(d).lower()
+    if os.path.dirname(d) == home and (base in CLOUD_HOME_NAMES or base.startswith("onedrive")):
+        return CLOUD_HOME_NAMES.get(base, "OneDrive")
+    low = d.lower() + "/"
+    if "/library/cloudstorage/" in low or "/library/mobile documents/" in low:
+        return cloud_provider(d) or "cloud"
+    if IS_MAC:
+        try:
+            for x in xattr_list(d):
+                for pre, prov in CLOUD_XATTR_PREFIXES:
+                    if x.startswith(pre):
+                        return prov
+        except OSError:
+            pass
+    return ""
+
+
+def is_protected(f):
+    """Soubor/složku aplikace nikdy neoznačí ani neodstraní: uvnitř balíčku/knihovny, nebo ve složce
+    synchronizované s cloudem. Smí být jen ponechaným originálem."""
+    if in_package(f):
+        return True
+    if getattr(f, "cloud", "") or is_cloud(f.path):
+        return True
+    files = getattr(f, "files", None)                 # složka v pohledu „Celé složky“
+    return bool(isinstance(files, dict) and any(getattr(x, "cloud", "") for x in files.values()))
+
+
 def is_dataless(path):
     try:
         return bool(getattr(os.lstat(path), "st_flags", 0) & SF_DATALESS)
@@ -314,18 +356,25 @@ def scan_files(roots, opts, cancel=None, progress=None):
         if opts.excluded(root, os.path.basename(root)):
             stats["excluded"] = stats.get("excluded", 0) + 1
             continue
-        stack = [root]
+        stack = [(root, cloud_provider(root))]
+        if stack[0][1]:
+            stats.setdefault("cloud", {})[root] = stack[0][1]
         while stack:
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
-            d = stack.pop()
+            d, cloud = stack.pop()
             try:
-                it = os.scandir(d)
+                with os.scandir(d) as it:
+                    entries = list(it)
             except OSError:
                 stats["errors"] += 1
                 continue
-            with it:
-                for e in it:
+            if not cloud:                              # kořen synchronizované složky uvnitř prohledávané
+                cloud = cloud_of_listing(d, {e.name for e in entries})
+                if cloud:
+                    stats.setdefault("cloud", {})[d] = cloud
+            if True:
+                for e in entries:
                     name = e.name
                     try:
                         if e.is_symlink():
@@ -342,7 +391,7 @@ def scan_files(roots, opts, cancel=None, progress=None):
                                 continue
                             if not opts.packages and os.path.splitext(name)[1].lower() in PACKAGE_EXT:
                                 continue
-                            stack.append(e.path)
+                            stack.append((e.path, cloud))
                             continue
                         if not e.is_file(follow_symlinks=False):
                             continue
@@ -369,7 +418,9 @@ def scan_files(roots, opts, cancel=None, progress=None):
                     files.append(FileInfo(e.path, name, st.st_size, st.st_mtime, btime,
                                           st.st_dev, st.st_ino, root,
                                           bool(getattr(st, "st_flags", 0) & (0x2 | 0x20000)), st.st_ctime,
-                                          bool(getattr(st, "st_flags", 0) & SF_DATALESS)))
+                                          bool(getattr(st, "st_flags", 0) & SF_DATALESS), cloud))
+                    if cloud:
+                        stats["cloud_files"] = stats.get("cloud_files", 0) + 1
             stats["dirs"] += 1
             if progress is not None:
                 now = time.monotonic()
@@ -629,7 +680,7 @@ def auto_mark(groups, strategy, prefer_folder=None):
         else:
             keep = sorted(g.files, key=keyfn)[0]
         for f in g.files:
-            f.marked = f is not keep and not in_package(f)
+            f.marked = f is not keep and not is_protected(f)
             count += f.marked
     return count
 
@@ -646,12 +697,12 @@ def auto_mark_per_volume(groups, strategy):
         for f in g.files:
             by_dev.setdefault(f.dev, []).append(f)
         for sub in by_dev.values():
-            sub = [f for f in sub if not is_cloud(f.path) and not f.dataless]   # cloud se klonovat nesmí
+            sub = [f for f in sub if not is_protected(f) and not f.dataless]   # cloud/knihovny ne
             if len(sub) < 2:
                 continue
             keep = sorted(sub, key=keyfn)[0]
             for f in sub:
-                if f is not keep and not in_package(f) and not (f.clone and f.clone == keep.clone):
+                if f is not keep and not (f.clone and f.clone == keep.clone):
                     f.marked = True
                     count += 1
                     save += f.size
@@ -667,7 +718,7 @@ def mark_in_folder(groups, folder, mark=True):
         unmarked = sum(1 for x in g.files if not x.marked)
         for f in g.files:
             if in_folder(f.path, folder):
-                if mark and in_package(f):
+                if mark and is_protected(f):
                     continue
                 if mark and not f.marked and unmarked <= 1:
                     break
@@ -683,7 +734,7 @@ def plan_actions(groups):
     Soubory uvnitř balíčků/skrytých složek se nikdy neodstraňují."""
     plan, skipped = [], 0
     for g in groups:
-        marked = [f for f in g.files if f.marked and not in_package(f)]
+        marked = [f for f in g.files if f.marked and not is_protected(f)]
         keep = [f for f in g.files if not f.marked]
         if not marked:
             continue
@@ -1600,7 +1651,10 @@ def check_pair(keeper, dup, strict_meta=False, own_rsrc_ok=False, replace=False)
         return Skip(T("soubor se od hledání změnil – hledej znovu"))
     if in_package(dup):
         return Skip(T("je uvnitř balíčku nebo skryté složky – mazat se nesmí"))
-    if replace and (is_cloud(dup.path) or is_cloud(keeper.path)):
+    if getattr(dup, "cloud", "") or is_cloud(dup.path):
+        return Skip(T("je ve složce synchronizované s cloudem ({0}) – soubory v cloudu se nikdy neoznačují "
+                      "ani nemažou; přeskočeno", getattr(dup, "cloud", "") or cloud_provider(dup.path)))
+    if replace and is_cloud(keeper.path):
         return Skip(T("je ve složce synchronizované s cloudem (OneDrive, Google Drive, iCloud…) – náhrada by "
                       "soubor znovu nahrála do cloudu a mohla smazat jeho historii verzí a sdílení; přeskočeno "
                       "(použij Do Koše)"))
@@ -1776,6 +1830,15 @@ def _tree_files(root):
     return out
 
 
+def _tree_cloud(root):
+    """Je někde uvnitř složky kořen synchronizované složky? Vrací název cloudu nebo ""."""
+    for dp, dn, fn in os.walk(root):
+        prov = cloud_of_listing(dp, set(dn) | set(fn))
+        if prov:
+            return prov
+    return ""
+
+
 def check_folder_pair(keep, dup):
     """Smí jít složka `dup` celá do Koše, když zůstane `keep`? None = ano, jinak důvod.
     Obě složky se projdou ZNOVU (i skryté a malé soubory) a každý soubor se porovná bajt po bajtu."""
@@ -1787,6 +1850,10 @@ def check_folder_pair(keep, dup):
         return Skip(T("složky jsou jedna v druhé – přeskočeno"))
     if in_package(dup):
         return Skip(T("složka je uvnitř balíčku nebo skryté složky – mazat se nesmí"))
+    prov = cloud_provider(dup.path) or _tree_cloud(dup.path)
+    if prov:
+        return Skip(T("složka je (nebo obsahuje) data synchronizovaná s cloudem ({0}) – nesmí se mazat; přeskočeno",
+                      prov))
     try:
         a, b = _tree_files(keep.path), _tree_files(dup.path)
         if set(a) != set(b):
@@ -3120,15 +3187,6 @@ class App:
         self.roots = dirs
         self.files, self.scan_sig = [], None
         self.update_roots_label()
-        clouds = sorted({cloud_provider(d) for d in dirs} - {""})
-        if clouds:
-            messagebox.showinfo(APP_TITLE, T(
-                "☁ Vybraná složka se synchronizuje s cloudem ({0}).\n\n"
-                "• Smazání nebo přesun souboru se projeví i v cloudu a na všech ostatních zařízeních "
-                "(u sdílených složek i ostatním lidem).\n"
-                "• APFS klony, pevné odkazy, aliasy ani symlinky se tu dělat nebudou – cloud by soubory "
-                "nahrál znovu a mohl by smazat jejich historii verzí.\n"
-                "• Soubory jen v cloudu (nestažené) se kvůli porovnání nestahují.", ", ".join(clouds)))
         if not self.busy:
             self.start_search()
 
@@ -3251,6 +3309,9 @@ class App:
         elif kind == "groups":
             _, groups, stats, nfiles, secs, folders, hits = msg
             self.set_busy(False)
+            if stats is not None:
+                self.cloud_roots = stats.get("cloud", {})
+                self.root.after(200, lambda c=dict(self.cloud_roots): self.warn_cloud(c))
             self.groups = groups
             self.folder_groups = folders
             self.cb_view.configure(values=[T("Soubory"), T("Celé složky ({0})", len(folders))])
@@ -3268,6 +3329,8 @@ class App:
                     extra += T("  •  vyloučené složky: {0}", stats['excluded'])
             if hits and hits[0]:
                 extra += T("  •  z paměti otisků: {0}", fmt_int(hits[0]))
+            if stats and stats.get("cloud_files"):
+                extra += T("  •  ☁ v cloudu (chráněno): {0}", fmt_int(stats["cloud_files"]))
             if hits and hits[1]:
                 extra += T("  •  jen v cloudu (nestaženo, neověřeno): {0}", fmt_int(hits[1]))
             if folders:
@@ -3399,7 +3462,7 @@ class App:
             self.iid_file[iid] = f
             self.tree.insert(giid, "end", iid=iid,
                              text=("🔒 " if f.locked else "") + ("📦 " if in_package(f) else "")
-                             + ("☁ " if getattr(f, "dataless", False) else "")
+                             + ("☁ " if getattr(f, "dataless", False) or getattr(f, "cloud", "") else "")
                              + ("⧉ " if f.clone and clones.get(f.clone, 0) > 1 else "")
                              + f.name,
                              values=(CHECK_ON if f.marked else CHECK_OFF, fmt_size(f.size),
@@ -3453,6 +3516,11 @@ class App:
             return
         if not f.marked and in_package(f):
             self.v_status.set(T("Soubor je uvnitř balíčku nebo skryté složky (např. knihovna Fotek, .git) – smazáním by se poškodila celá knihovna. Může zůstat jen jako ponechaný."))
+            self.root.bell()
+            return
+        if not f.marked and is_protected(f):
+            self.v_status.set(T("☁ Soubor je ve složce synchronizované s cloudem – takové soubory aplikace nikdy "
+                                "neoznačí ani nesmaže. Může zůstat jen jako ponechaný originál."))
             self.root.bell()
             return
         if not f.marked and sum(1 for x in g.files if not x.marked) <= 1:
@@ -3561,7 +3629,7 @@ class App:
         keep = self.iid_file[sel[0]]
         giid = self.tree.parent(sel[0])
         for f in self.iid_group[giid].files:
-            f.marked = f is not keep and not in_package(f)
+            f.marked = f is not keep and not is_protected(f)
         self.refresh_group(giid)
         self.update_marked()
 
@@ -3990,6 +4058,20 @@ class App:
         files = [f for _, m in plan for f in m]
         ctx = self.make_ctx("replace", plan, rkind="clone")
         self.run_action(T("Uvolnit místo"), lambda: self.exec_action(ctx, files), ctx)
+
+    def warn_cloud(self, clouds):
+        """Po prohledání: ve vybraných složkách jsou data synchronizovaná s cloudem."""
+        if not clouds:
+            return
+        items = sorted(clouds.items())
+        lines = "\n".join(f"• {p}   ({c})" for p, c in items[:12])
+        if len(items) > 12:
+            lines += "\n" + T("… a dalších {0}", len(items) - 12)
+        messagebox.showinfo(APP_TITLE, T(
+            "☁ Ve vybraných složkách jsou data synchronizovaná s cloudem:\n\n{0}\n\n"
+            "Soubory v nich se v seznamu zobrazí (☁), ale aplikace je nikdy neoznačí, nesmaže, nepřesune "
+            "ani nenahradí – smazání by se projevilo v cloudu i na ostatních zařízeních. Mohou ale sloužit "
+            "jako ponechaný originál: smazat jde jen jejich kopie mimo cloud.", lines))
 
     # ---------- jazyk
     def change_lang(self):

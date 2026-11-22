@@ -1000,4 +1000,16 @@ EN = {
         "What's new in version {0}:\n\n{1}",
     "🔔  Je k dispozici nová verze {0}  (máš {1})":
         "🔔  A new version {0} is available  (you have {1})",
+    "je ve složce synchronizované s cloudem ({0}) – soubory v cloudu se nikdy neoznačují ani nemažou; přeskočeno":
+        "is in a folder synced with the cloud ({0}) – files in the cloud are never marked or deleted; skipped",
+    "složka je (nebo obsahuje) data synchronizovaná s cloudem ({0}) – nesmí se mazat; přeskočeno":
+        "the folder is (or contains) data synced with the cloud ({0}) – it must not be deleted; skipped",
+    "☁ Soubor je ve složce synchronizované s cloudem – takové soubory aplikace nikdy neoznačí ani nesmaže. Může zůstat jen jako ponechaný originál.":
+        "☁ The file is in a folder synced with the cloud – the app never marks or deletes such files. It can only be kept as the original.",
+    "… a dalších {0}":
+        "… and {0} more",
+    "☁ Ve vybraných složkách jsou data synchronizovaná s cloudem:\n\n{0}\n\nSoubory v nich se v seznamu zobrazí (☁), ale aplikace je nikdy neoznačí, nesmaže, nepřesune ani nenahradí – smazání by se projevilo v cloudu i na ostatních zařízeních. Mohou ale sloužit jako ponechaný originál: smazat jde jen jejich kopie mimo cloud.":
+        "☁ The selected folders contain data synced with the cloud:\n\n{0}\n\nFiles in them are shown in the list (☁), but the app never marks, deletes, moves or replaces them – deleting would affect the cloud and other devices. They can still serve as the kept original: only their copies outside the cloud can be deleted.",
+    "  •  ☁ v cloudu (chráněno): {0}":
+        "  •  ☁ in the cloud (protected): {0}",
 }
